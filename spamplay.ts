@@ -1,5 +1,6 @@
-import fs = require("fs")
-import path = require('path')
+import fs = require("fs");
+import path = require("path");
+import http = require("http");
 
 interface IMovie {
 	title: string;
@@ -113,12 +114,34 @@ class Corpus implements ICorpus {
 	public lineIds:        number[];
 	public conversations:  Conversation[];
 	
+	corpusZipUrl      = "http://www.mpi-sws.org/~cristian/data/cornell_movie_dialogs_corpus.zip";
+	corpusCacheDir    = path.join(__dirname, "corpusCache");
+	corpusCachedZip   = path.join(this.corpusCacheDir, "cornell_movie_dialogs_corpus.zip");
+	charactersFile    = path.join(this.corpusCacheDir, 'movie_characters_metadata.txt');
+	conversationsFile = path.join(this.corpusCacheDir, 'movie_conversations.txt');
+	linesFile         = path.join(this.corpusCacheDir, 'movie_lines.txt');
+	moviesFile        = path.join(this.corpusCacheDir, 'movie_titles_metadata.txt');
+			
 	constructor() {
 		this.movies = this.characters = this.lines = {};
 		this.conversations = [];
 		this.movieIds = this.characterIds = this.lineIds = [];
+		
+		fs.mkdirSync(this.corpusCacheDir); 
+		try {
+			let stats = fs.lstatSync(this.corpusCachedZip);
+		}
+		catch (error) {
+			let zipWriter = fs.createWriteStream(this.corpusCachedZip);
+			let request = http.get(this.corpusZipUrl, function(response){
+				response.pipe(zipWriter);
+			});
+		}
 	}
 	
+	parseCorpus2(charactersFd: File, conversationsFd: File, linesFd: File, moviesFd: File) {
+		
+	}
 	parseCorpus(characters: string, conversations: string, lines: string, movies: string) {
 		let fieldSeparator = ' +++$+++ ';
 		var idx;
@@ -190,13 +213,16 @@ class Corpus implements ICorpus {
 		}
 	}
 	
-	static constructFromZipfile(corpusZipfilePath: string) {
-		throw "Not implemented";
+	static constructFromZipUrl(corpusZipUrl: string) {
+		try {
+			stats = fs.lstatSync()
+		}
 	}
 	
+	/*
 	static constructFromDirectory(corpusDirectory: string) {
 
-		let chars  = fs.readFileSync(path.resolve(corpusDirectory, 'movie_characters_metadata.txt'), "utf8");
+		let chars  = fs.readFileSync(path.resolve , "utf8");
 		let convos = fs.readFileSync(path.resolve(corpusDirectory, 'movie_conversations.txt'), "utf8");
 		let lines  = fs.readFileSync(path.resolve(corpusDirectory, 'movie_lines.txt'), "utf8");
 		let movies = fs.readFileSync(path.resolve(corpusDirectory, 'movie_titles_metadata.txt'), "utf8");
@@ -206,7 +232,7 @@ class Corpus implements ICorpus {
 		corpus.parseCorpus(chars, convos, lines, movies);
 		return corpus;
 	}
-
+	*/
 }
 
 console.log("Attempting to parse corpus data...");
