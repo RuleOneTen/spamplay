@@ -1,6 +1,72 @@
 import fs = require("fs");
 import path = require("path");
 import http = require("http");
+import zlib = require("zlib");
+
+/* Test whether a file exists, returning true or false 
+ */
+function testPathExists(path: string) {
+    try {
+        let stats = fs.lstatSync(this.corpusCachedZip);
+        return true;
+    }
+    catch (error) {
+        return false;
+    }
+}
+
+/* Coerce an array-like object - such as the automatic 'arguments' variable - to be an array
+ * From: <http://hustoknow.blogspot.com/2010/10/arrayprototypeslicecallarguments.html>
+ * See also: <https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/arguments>
+ */
+function coerceArray(arrayLikeObject: any) {
+    return Array.prototype.slice.call(arrayLikeObject);
+}
+
+/* From <http://book.mixu.net/node/ch7.html>
+ * Run a series of asynchronous calls - each call will wait until the previous one finishes, but all will run off the main thread
+ * parameter: tasks: an array of functions. 
+ *   Each of these functions is expected to wrap an asynchronous function which takes a callback
+ *   Each one should take its own callback argument, and provide it to the asynchronous function 
+ * parameter: final: a function which takes one argument: an array of results from previous tasks. 
+ */
+function asyncSeries(tasks: Function[], final: Function) {
+    var results = [];
+    function next() {
+        var thisTask = tasks.shift();
+        if (thisTask) {
+            thisTask(function() {
+                results.push(coerceArray(arguments));
+                next();
+            });
+        } 
+        else {
+            final(results);
+        }
+    }
+    next();
+}
+
+/* From
+ * Run a set of asynchronous calls, and when they're all finished, run a final call
+ * parameter: tasks: an array of functions. Each function should take one argument, which itself is a function
+ *   Each of these functions is expected to wrap an asynchronous function which takes a callback
+ *   Each one should take its own callback argument, and provide it to the asynchronous function 
+ * parameter: final: a function which takes one argument: an array of results from the previous tasks
+ */
+function asyncParallel(tasks: Function[], final: Function) {
+    var results = [];
+    var result_count = 0;
+    tasks.forEach(function(callback, index) {
+        callback( function() {
+            results[index] = coerceArray(arguments);
+            result_count++;
+            if (result_count == tasks.length) {
+                final(results);
+            }
+        });
+    });
+}
 
 interface IMovie {
 	title: string;
@@ -105,6 +171,11 @@ interface ICorpus {
 	lineIds:        number[];
 	conversations:  Conversation[];
 }
+enum CorpusState {
+    Initial, 
+    Downloaded,
+    Parsed
+}
 class Corpus implements ICorpus {
 	public movies:         {};
 	public movieIds:       number[];
@@ -121,28 +192,136 @@ class Corpus implements ICorpus {
 	conversationsFile = path.join(this.corpusCacheDir, 'movie_conversations.txt');
 	linesFile         = path.join(this.corpusCacheDir, 'movie_lines.txt');
 	moviesFile        = path.join(this.corpusCacheDir, 'movie_titles_metadata.txt');
+    
+    parsedMovies = false;
+    parsedCharacters = false;
+    parsedLines = false;
+    parsedConversations = false;
 			
 	constructor() {
 		this.movies = this.characters = this.lines = {};
 		this.conversations = [];
 		this.movieIds = this.characterIds = this.lineIds = [];
 		
-		fs.mkdirSync(this.corpusCacheDir); 
-		try {
-			let stats = fs.lstatSync(this.corpusCachedZip);
-		}
-		catch (error) {
-			let zipWriter = fs.createWriteStream(this.corpusCachedZip);
-			let request = http.get(this.corpusZipUrl, function(response){
-				response.pipe(zipWriter);
-			});
-		}
+        // Download and extract the corpus: 
+        let tasks = [
+            function(callback) { fs.mkdir(this.corpusCacheDir, callback)},
+            function(callback) { 
+                if (testPathExists(this.corpusCachedZip)) {
+                    callback();
+                }
+                else {
+                    let fileWriter = fs.createWriteStream(this.corpusCachedZip);
+                    let request = http.get(this.corpusZipUrl, function(response){
+                        response.pipe(fileWriter);
+                        //this.state = CorpusState.Downloaded;
+                        callback();
+                    });
+                }
+            },
+            function(callback) { throw "Extract the individual files here"; callback(); },
+            function(callback) { this.parseRawMoviesString(this.moviesString); callback(); },
+            function(callback) { this.parseRawCharactersStrinh(this.charactersString); callback(); },
+            function(callback) { this.parseRawLinesString(this.linesString); callback(); },
+            function(callback) { this.parseRawConversationsString(this.conversationsString); callback(); }
+        ]
+        asyncSeries(tasks, null);
 	}
 	
-	parseCorpus2(charactersFd: File, conversationsFd: File, linesFd: File, moviesFd: File) {
-		
-	}
-	parseCorpus(characters: string, conversations: string, lines: string, movies: string) {
+    //state: CorpusState = CorpusState.Initial;
+	
+
+    // TODO: how do I declare the signature of the foreachLine and callback functions ?
+    parseRawCorpusString(rawString: string, requiredFieldCount: number, foreachSplitLine: Function, callback: Function) {
+		let fieldSeparator = ' +++$+++ ';
+        let linesArray = rawString.split('\n');
+        let returnArray = [];
+        for (var idx=0; idx < linesArray.length; ++idx) {
+            let splitLine = linesArray[idx].split(fieldSeparator);
+            if (splitLine.length != requiredFieldCount) {
+                console.log(`Found a splitLine of invalid length '${splitLine.length}'; expected ${requiredFieldCount}`);
+                continue; 
+            }
+            foreachSplitLine(splitLine);
+        }
+        callback(returnArray);
+    }
+    
+    parseRawMoviesString(movies: string): void {
+        this.parseRawCorpusString(
+            movies, 6,
+            function(splitLine: string[]) {
+                var movieId = parseInt(splitLine[0].substring(1));
+                var title = splitLine[1];
+                var year = parseInt(splitLine[2]);
+                var rating = parseFloat(splitLine[3]);
+                var voteCount = parseInt(splitLine[4]);
+                //var genres = splitLine[5]; // TODO: split this into something useful
+                this.movies[movieId.toString()] = new Movie(title, year, rating, voteCount, movieId);
+                this.movieIds.push(movieId);
+            },
+            function() { this.parsedMovies = true; }
+        )
+    }
+    parseRawCharactersString(characters: string): void {
+        this.parseRawCorpusString(
+            characters, 6,
+            function(splitLine: string[]) {
+                var charId = parseInt(splitLine[0].substring(1));
+                var charName = splitLine[1];
+                var movieId = parseInt(splitLine[2].substring(1));
+                var movieName = splitLine[3];
+                var movie = this.movies[movieId.toString()];
+                var charGender = (splitLine[4] != '?') ? splitLine[4] : null;
+                var creditsPosition = parseInt(splitLine[5]);
+                this.characters[charId.toString()] = new Character(charName, movie, movieId, charGender, creditsPosition);
+                this.characterIds.push(charId);
+            },
+            function() { this.parsedCharacters = true; }
+        )
+    }
+    parseRawLinesString(lines: string): void {
+        this.parseRawCorpusString(
+            lines, 5,
+            function(splitLine: string[]) {
+                var lineId = parseInt(splitLine[0].substring(1));
+                var charId = parseInt(splitLine[1].substring(1));
+                var character = this.characters[charId.toString()];
+                var movieId = parseInt(splitLine[2].substring(1));
+                var movie = this.movies[movieId.toString()];
+                var charName = splitLine[3];
+                var text = splitLine[4];
+                this.lines[lineId.toString()] = new DialogLine(character, movie, text, lineId);
+                this.lineIds.push(lineId);
+            },
+            function() { this.parsedLines = true; }
+        )
+    }
+    parseRawConversationsString(conversations: string): void {
+        this.parseRawCorpusString(
+            conversations, 4, 
+            function(splitLine: string[]) { 
+                var char1Id = parseInt(splitLine[0].substring(1));
+                var char2Id = parseInt(splitLine[1].substring(1));
+                let characters = [this.characters[char1Id.toString()], this.characters[char2Id.toString()]]
+                let movieId = parseInt(splitLine[2].substring(1));
+                let movie = this.movies[movieId.toString()];
+                let lineIdStrings = splitLine[3].match( RegExp('L\d+') );
+                var lineObjects = [];
+                for (var idy=0; idy < lineIdStrings.length; ++idy) {
+                    let lineId = lineIdStrings[idy];
+                    let lineObj = this.lines[lineId];
+                    lineObjects.push(lineObj);
+                }
+                this.conversations.push(new Conversation(characters, movie, lineObjects));
+            },
+            function() { this.parsedConversations = true; }
+        )
+    }
+    
+
+	/*
+	parseCorpus(characters: string, conversations: string, lines: string, movies: string): void {
 		let fieldSeparator = ' +++$+++ ';
 		var idx;
 		
@@ -212,31 +391,11 @@ class Corpus implements ICorpus {
 			this.conversations.push(new Conversation(characters, movie, lineObjects));
 		}
 	}
-	
-	static constructFromZipUrl(corpusZipUrl: string) {
-		try {
-			stats = fs.lstatSync()
-		}
-	}
-	
-	/*
-	static constructFromDirectory(corpusDirectory: string) {
-
-		let chars  = fs.readFileSync(path.resolve , "utf8");
-		let convos = fs.readFileSync(path.resolve(corpusDirectory, 'movie_conversations.txt'), "utf8");
-		let lines  = fs.readFileSync(path.resolve(corpusDirectory, 'movie_lines.txt'), "utf8");
-		let movies = fs.readFileSync(path.resolve(corpusDirectory, 'movie_titles_metadata.txt'), "utf8");
-		
-
-		let corpus = new Corpus;
-		corpus.parseCorpus(chars, convos, lines, movies);
-		return corpus;
-	}
-	*/
+    */
 }
 
 console.log("Attempting to parse corpus data...");
-let corpus = Corpus.constructFromDirectory('cornell movie-dialogs corpus');
+let corpus = new Corpus();
 console.log("Successfully parsed corpus data!");
 console.log(` -  ${corpus.movieIds.length} movies`);
 console.log(` -  ${corpus.characterIds.length} characters`);
