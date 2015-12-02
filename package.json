@@ -1,0 +1,8 @@
+{
+  "name": "spamplay",
+  "version": "0.0.1",
+  "dependencies": {
+    "typescript": "^1.7.3",
+    "tsd": "^0.6.5"
+  }
+}
