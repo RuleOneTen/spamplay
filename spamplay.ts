@@ -20,6 +20,34 @@ function testPathExistsSync(path: string) {
     }
 }
 
+interface StringToAnyMapping<Type> {
+    [key: string]: Type;
+}
+class Dictionary<ValueType> {
+    public map: StringToAnyMapping<ValueType> = {};
+    get keys() {
+        var _keys = [];
+        for (let key in this.map) {
+            if (this.map.hasOwnProperty(key)) { 
+                _keys.push(key);
+            }
+        }
+        return _keys;
+    }
+    get values() {
+        var _values = [];
+        for (let key in this.map) { 
+            if (this.map.hasOwnProperty(key)) {
+                _values.push(this.map[key]);
+            }
+        }
+        return _values;
+    }
+    get length() { 
+        return this.values.length
+    }
+}
+
 interface IMovie {
 	title: string;
 	year: number;
@@ -75,21 +103,15 @@ interface ICorpus {
 */
 interface ICorpus {
 	movies:         {};
-	movieIds:       number[];
 	characters:     {};
-	characterIds:   number[];
 	lines:          {};
-	lineIds:        number[];
 	conversations:  Conversation[];
 }
 class Corpus implements ICorpus {
 
-	public movies:         {};
-	public movieIds:       number[];
-	public characters:     {};
-	public characterIds:   number[];
-	public lines:          {};
-	public lineIds:        number[];
+	public movies:         Dictionary<Movie>;
+	public characters:     Dictionary<Character>;
+	public lines:          Dictionary<DialogLine>;
 	public conversations:  Conversation[];
 	
     // TODO: this is dumb bad design lol. REVISITREVISITREVISITREVISITREVISIT
@@ -117,9 +139,10 @@ class Corpus implements ICorpus {
 			
     constructor() {
 	//constructFromZip() {
-		this.movies = this.characters = this.lines = {};
+        this.movies = new Dictionary<Movie>();
+        this.characters = new Dictionary<Character>();
+        this.lines = new Dictionary<DialogLine>();
 		this.conversations = [];
-		this.movieIds = this.characterIds = this.lineIds = [];
         
         try { fs.mkdirSync(Corpus.spamplayCacheDir); } catch (error) {}; // TODO: throw any error except one where the dir alredy exists
         if (!(testPathExistsSync(Corpus.spamplayCacheDir))) {
@@ -187,11 +210,10 @@ class Corpus implements ICorpus {
             var rating = parseFloat(splitLine[3]);
             var voteCount = parseInt(splitLine[4]);
             //var genres = splitLine[5]; // TODO: split this into something useful
-            this.movies[movieId.toString()] = new Movie(title, year, rating, voteCount, movieId);
-            this.movieIds.push(movieId);
+            this.movies.map[movieId.toString()] = new Movie(title, year, rating, voteCount, movieId);
         }
         let completionClosure = () => { 
-            console.log(`Parsed ${this.movieIds.length} movies`);
+            console.log(`Parsed ${this.movies.length} movies`);
             //pconsole.log(`Parsed ${this.movies.} movies`);
             this.parsedMovies = true; 
         };
@@ -203,14 +225,13 @@ class Corpus implements ICorpus {
             var charName = splitLine[1];
             var movieId = parseInt(splitLine[2].substring(1));
             var movieName = splitLine[3];
-            var movie = this.movies[movieId.toString()];
+            var movie = this.movies.map[movieId.toString()];
             var charGender = (splitLine[4] != '?') ? splitLine[4] : null;
             var creditsPosition = parseInt(splitLine[5]);
-            this.characters[charId.toString()] = new Character(charName, movie, movieId, charGender, creditsPosition);
-            this.characterIds.push(charId);
+            this.characters.map[charId.toString()] = new Character(charName, movie, movieId, charGender, creditsPosition);
         }
         let completionClosure = () => {
-            console.log(`Parsed ${this.characterIds.length} characters`);
+            console.log(`Parsed ${this.characters.length} characters`);
             this.parsedCharacters = true;
         }
         this.parseRawCorpusString(characters, 6, lineParser, completionClosure);
@@ -219,16 +240,15 @@ class Corpus implements ICorpus {
         let lineParser = (splitLine: string[]) => {
             var lineId = parseInt(splitLine[0].substring(1));
             var charId = parseInt(splitLine[1].substring(1));
-            var character = this.characters[charId.toString()];
+            var character = this.characters.map[charId.toString()];
             var movieId = parseInt(splitLine[2].substring(1));
-            var movie = this.movies[movieId.toString()];
+            var movie = this.movies.map[movieId.toString()];
             var charName = splitLine[3];
             var text = splitLine[4];
-            this.lines[lineId.toString()] = new DialogLine(character, movie, text, lineId);
-            this.lineIds.push(lineId);
+            this.lines.map[lineId.toString()] = new DialogLine(character, movie, text, lineId);
         }
         let completionClosure = () => {
-            console.log(`Parsed ${this.lineIds.length} lines`);
+            console.log(`Parsed ${this.lines.length} lines`);
             this.parsedLines = true; 
         }
         this.parseRawCorpusString(lines, 5, lineParser, completionClosure);
@@ -237,9 +257,9 @@ class Corpus implements ICorpus {
         let lineParser = (splitLine: string[]) => { 
             var char1Id = parseInt(splitLine[0].substring(1));
             var char2Id = parseInt(splitLine[1].substring(1));
-            let characters = [this.characters[char1Id.toString()], this.characters[char2Id.toString()]]
+            let characters = [this.characters.map[char1Id.toString()], this.characters.map[char2Id.toString()]]
             let movieId = parseInt(splitLine[2].substring(1));
-            let movie = this.movies[movieId.toString()];
+            let movie = this.movies.map[movieId.toString()];
             let lineIdStrings = splitLine[3].match(/L\d+/g);
             if (!lineIdStrings) { 
                 console.log(`couldn't figure out the line IDs for convo "${splitLine.join(' ')}"`)
@@ -247,7 +267,7 @@ class Corpus implements ICorpus {
             var lineObjects = [];
             for (var idy=0; idy < lineIdStrings.length; ++idy) {
                 let lineId = lineIdStrings[idy];
-                let lineObj = this.lines[lineId];
+                let lineObj = this.lines.map[lineId];
                 lineObjects.push(lineObj);
             }
             this.conversations.push(new Conversation(characters, movie, lineObjects));
