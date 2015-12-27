@@ -20,11 +20,14 @@ function testPathExistsSync(path: string) {
     }
 }
 
-interface StringToAnyMapping<Type> {
+/* This interface is just like the built in JS objects which have 'string' keys and 'any' values */
+interface IStringToAnyMapping<Type> {
     [key: string]: Type;
 }
+
+/* Bare wrapper around JS objects that let me include some really basic features that should already exist, ugh */
 class Dictionary<ValueType> {
-    public map: StringToAnyMapping<ValueType> = {};
+    public map: IStringToAnyMapping<ValueType> = {};
     get keys() {
         var _keys = [];
         for (let key in this.map) {
@@ -90,30 +93,14 @@ class Conversation implements IConversation {
 	constructor(public characters: Character[], public movie: Movie, public lines: DialogLine[]) {}
 }
 
-/* TODO: I can't seem to type these correctly?
 interface ICorpus {
-	movies:         {number: Movie};
-	movieIds:       number[];
-	characters:     {number: Character};
-	characterIds:   number[];
-	lines:          {number: DialogLine};
-	lineIds:        number[];
-	conversations:  Conversation[];
-}
-*/
-interface ICorpus {
-	movies:         {};
-	characters:     {};
-	lines:          {};
+	movies:         Dictionary<Movie>;
+	characters:     Dictionary<Character>;
+	lines:          Dictionary<DialogLine>;
 	conversations:  Conversation[];
 }
 class Corpus implements ICorpus {
 
-	public movies:         Dictionary<Movie>;
-	public characters:     Dictionary<Character>;
-	public lines:          Dictionary<DialogLine>;
-	public conversations:  Conversation[];
-	
     // TODO: this is dumb bad design lol. REVISITREVISITREVISITREVISITREVISIT
 	corpusZipUrl      = "http://www.mpi-sws.org/~cristian/data/cornell_movie_dialogs_corpus.zip";
 	static spamplayCacheDir  = path.join(__dirname, "cache");
@@ -134,29 +121,31 @@ class Corpus implements ICorpus {
         return this.parsedMovies && this.parsedCharacters && this.parsedLines && this.parsedConversations
     }
 
-    // TODO: Having movies/movieIds, lines/lineIds, etc, is not really very good. Fix. 
-    //constructor(public movies: Movie[], public movieIds: number[], public characters: Character[], public characterIds: number[], ) {}
-			
-    constructor() {
-	//constructFromZip() {
-        this.movies = new Dictionary<Movie>();
-        this.characters = new Dictionary<Character>();
-        this.lines = new Dictionary<DialogLine>();
-		this.conversations = [];
+    constructor(public movies?: Dictionary<Movie>, public characters?: Dictionary<Character>, public lines?: Dictionary<DialogLine>, public conversations?: Conversation[]) {
+        if (!movies) { this.movies = new Dictionary<Movie>(); }
+        if (!characters) { this.characters = new Dictionary<Character>(); }
+        if (!lines) { this.lines = new Dictionary<DialogLine>(); }
+        if (!conversations) { this.conversations = []; }
+    }
+
+	static fromZip() {
+        var newCorpus = new Corpus();
         
         try { fs.mkdirSync(Corpus.spamplayCacheDir); } catch (error) {}; // TODO: throw any error except one where the dir alredy exists
-        if (!(testPathExistsSync(Corpus.spamplayCacheDir))) {
+        if (! (testPathExistsSync(Corpus.spamplayCacheDir)) ) {
             throw "You didn't get the Corpus and I'm too dumb to do it for you yet";
         }
         if (!testPathExistsSync(Corpus.corpusCacheDir)) {
-            this.unzipCorpusWithShellOut();
+            newCorpus.unzipCorpusWithShellOut();
         }
 
         // TODO: use some async library (ugh) to parallelize these: 
-        this.parseRawMoviesString( fs.readFileSync(Corpus.moviesFile).toString() );
-        this.parseRawCharactersString( fs.readFileSync(Corpus.charactersFile).toString() );
-        this.parseRawLinesString( fs.readFileSync(Corpus.linesFile).toString() );
-        this.parseRawConversationsString( fs.readFileSync(Corpus.conversationsFile).toString() );
+        newCorpus.parseRawMoviesString( fs.readFileSync(Corpus.moviesFile).toString() );
+        newCorpus.parseRawCharactersString( fs.readFileSync(Corpus.charactersFile).toString() );
+        newCorpus.parseRawLinesString( fs.readFileSync(Corpus.linesFile).toString() );
+        newCorpus.parseRawConversationsString( fs.readFileSync(Corpus.conversationsFile).toString() );
+
+        return newCorpus;
     }
 
     // unzipCorpusWithAdmZip() {
@@ -214,7 +203,6 @@ class Corpus implements ICorpus {
         }
         let completionClosure = () => { 
             console.log(`Parsed ${this.movies.length} movies`);
-            //pconsole.log(`Parsed ${this.movies.} movies`);
             this.parsedMovies = true; 
         };
         this.parseRawCorpusString(movies, 6, lineParser, completionClosure);
@@ -281,5 +269,5 @@ class Corpus implements ICorpus {
 }
 
 console.log("Attempting to parse corpus data...");
-let corpus = new Corpus();
+let corpus = Corpus.fromZip();
 
