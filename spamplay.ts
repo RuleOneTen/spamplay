@@ -101,15 +101,8 @@ interface ICorpus {
 }
 class Corpus implements ICorpus {
 
-    // TODO: this is dumb bad design lol. REVISITREVISITREVISITREVISITREVISIT
 	corpusZipUrl      = "http://www.mpi-sws.org/~cristian/data/cornell_movie_dialogs_corpus.zip";
-	static spamplayCacheDir  = path.join(__dirname, "cache");
-	static corpusCachedZip   = path.join(Corpus.spamplayCacheDir, "cornell_movie_dialogs_corpus.zip");
-    static corpusCacheDir    = path.join(Corpus.spamplayCacheDir, "cornell movie-dialogs corpus");
-	static charactersFile    = path.join(Corpus.corpusCacheDir, 'movie_characters_metadata.txt');
-	static conversationsFile = path.join(Corpus.corpusCacheDir, 'movie_conversations.txt');
-	static linesFile         = path.join(Corpus.corpusCacheDir, 'movie_lines.txt');
-	static moviesFile        = path.join(Corpus.corpusCacheDir, 'movie_titles_metadata.txt');
+	spamplayCacheDir  = path.join(__dirname, "cache");
     
     parsedMovies = false;
     parsedCharacters = false;
@@ -131,19 +124,26 @@ class Corpus implements ICorpus {
 	static fromZip() {
         var newCorpus = new Corpus();
         
-        try { fs.mkdirSync(Corpus.spamplayCacheDir); } catch (error) {}; // TODO: throw any error except one where the dir alredy exists
-        if (! (testPathExistsSync(Corpus.spamplayCacheDir)) ) {
+        let corpusCachedZip   = path.join(newCorpus.spamplayCacheDir, "cornell_movie_dialogs_corpus.zip");
+        let corpusCacheDir    = path.join(newCorpus.spamplayCacheDir, "cornell movie-dialogs corpus");
+        let charactersFile    = path.join(corpusCacheDir, 'movie_characters_metadata.txt');
+        let conversationsFile = path.join(corpusCacheDir, 'movie_conversations.txt');
+        let linesFile         = path.join(corpusCacheDir, 'movie_lines.txt');
+        let moviesFile        = path.join(corpusCacheDir, 'movie_titles_metadata.txt');
+
+        try { fs.mkdirSync(newCorpus.spamplayCacheDir); } catch (error) {}; // TODO: throw any error except one where the dir alredy exists
+        if (! (testPathExistsSync(newCorpus.spamplayCacheDir)) ) {
             throw "You didn't get the Corpus and I'm too dumb to do it for you yet";
         }
-        if (!testPathExistsSync(Corpus.corpusCacheDir)) {
+        if (!testPathExistsSync(corpusCacheDir)) {
             newCorpus.unzipCorpusWithShellOut();
         }
 
         // TODO: use some async library (ugh) to parallelize these: 
-        newCorpus.parseRawMoviesString( fs.readFileSync(Corpus.moviesFile).toString() );
-        newCorpus.parseRawCharactersString( fs.readFileSync(Corpus.charactersFile).toString() );
-        newCorpus.parseRawLinesString( fs.readFileSync(Corpus.linesFile).toString() );
-        newCorpus.parseRawConversationsString( fs.readFileSync(Corpus.conversationsFile).toString() );
+        newCorpus.parseRawMoviesString(        fs.readFileSync(moviesFile).toString()        );
+        newCorpus.parseRawCharactersString(    fs.readFileSync(charactersFile).toString()    );
+        newCorpus.parseRawLinesString(         fs.readFileSync(linesFile).toString()         );
+        newCorpus.parseRawConversationsString( fs.readFileSync(conversationsFile).toString() );
 
         return newCorpus;
     }
@@ -164,7 +164,7 @@ class Corpus implements ICorpus {
     // }
 
     unzipCorpusWithShellOut() {
-        let output = subprocess.execSync(`unzip -d "${Corpus.spamplayCacheDir}" "${Corpus.corpusCachedZip}"`);
+        let output = subprocess.execSync(`unzip -d "${this.spamplayCacheDir}" "${this.corpusCachedZip}"`);
     }
 
     // TODO: how do I declare the signature of the foreachLine and callback functions ?
