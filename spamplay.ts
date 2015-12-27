@@ -121,12 +121,12 @@ class Corpus implements ICorpus {
         return this.parsedMovies && this.parsedCharacters && this.parsedLines && this.parsedConversations
     }
 
-    constructor(public movies?: Dictionary<Movie>, public characters?: Dictionary<Character>, public lines?: Dictionary<DialogLine>, public conversations?: Conversation[]) {
-        if (!movies) { this.movies = new Dictionary<Movie>(); }
-        if (!characters) { this.characters = new Dictionary<Character>(); }
-        if (!lines) { this.lines = new Dictionary<DialogLine>(); }
-        if (!conversations) { this.conversations = []; }
-    }
+    constructor(
+        public movies:         Dictionary<Movie>       = new Dictionary<Movie>(),
+        public characters:     Dictionary<Character>   = new Dictionary<Character>(),
+        public lines:          Dictionary<DialogLine>  = new Dictionary<DialogLine>(),
+        public conversations:  Conversation[]          = new Array<Conversation>())
+    {}
 
 	static fromZip() {
         var newCorpus = new Corpus();
@@ -183,7 +183,7 @@ class Corpus implements ICorpus {
                 var errorString  = `Found a splitLine of invalid length '${splitLine.length}'`;
                     errorString += `\nexpected ${requiredFieldCount}`;
                     errorString += `\non line ${line} of length ${line.length}`;
-                console.log(errorString)
+                console.log(errorString);
                 continue; 
             }
             foreachSplitLine(splitLine);
