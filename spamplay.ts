@@ -9,7 +9,7 @@ import subprocess = require("child_process");
 
 /* Test whether a file exists, returning true or false 
  */
-function testPathExistsSync(path: string) {
+function testPathExistsSync(path: string): Boolean {
     try {
         let stats = fs.lstatSync(path);
         return true;
@@ -20,6 +20,25 @@ function testPathExistsSync(path: string) {
     }
 }
 
+/* Returns a random integer between min (included) and max (included)
+ * Using Math.round() will give you a non-uniform distribution!
+ * from: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/random
+ */
+function getRandomIntInclusive(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function toTitleCase(str: string) {
+    return str.replace(/\w\S*/g, function(txt){return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase();});
+}
+
+/* Unzip a zipfile to a directory
+ */
+function unzipShellout(zipFile: string, outputDir: string) {
+     let output = subprocess.execSync(`unzip -d "${outputDir}" "${zipFile}"`);
+     console.log(output);
+}
+
 /* This interface is just like the built in JS objects which have 'string' keys and 'any' values */
 interface IStringToAnyMapping<Type> {
     [key: string]: Type;
@@ -28,7 +47,7 @@ interface IStringToAnyMapping<Type> {
 /* Bare wrapper around JS objects that let me include some really basic features that should already exist, ugh */
 class Dictionary<ValueType> {
     public map: IStringToAnyMapping<ValueType> = {};
-    get keys() {
+    get keys(): string[] {
         var _keys = [];
         for (let key in this.map) {
             if (this.map.hasOwnProperty(key)) { 
@@ -37,7 +56,7 @@ class Dictionary<ValueType> {
         }
         return _keys;
     }
-    get values() {
+    get values(): ValueType[] {
         var _values = [];
         for (let key in this.map) { 
             if (this.map.hasOwnProperty(key)) {
@@ -46,7 +65,7 @@ class Dictionary<ValueType> {
         }
         return _values;
     }
-    get length() { 
+    get length(): number { 
         return this.values.length
     }
 }
@@ -79,9 +98,16 @@ interface IDialogLine {
 	movie: Movie;
 	text: string;
 	cornellId: number;
+    print(): void;
 }
 class DialogLine implements IDialogLine{
 	constructor(public character: Character, public movie: Movie, public text: string, public cornellId: number) {}
+    consolePrint() {
+        console.log(`<DialogLine #${this.cornellId.toString()} "${this.text}" - ${this.character.name} in _${this.movie.title}_`);
+    }
+    print() { 
+        console.log(`${this.character.name}: "${this.text}"`);
+    }
 }
 
 interface IConversation {
@@ -91,6 +117,16 @@ interface IConversation {
 }
 class Conversation implements IConversation {
 	constructor(public characters: Character[], public movie: Movie, public lines: DialogLine[]) {}
+    consolePrint() { 
+        console.log(`================`)
+        console.log(`${this.movie.title.toUpperCase()} (${this.movie.genres.join(", ")})`);
+        this.lines.forEach(
+            function(line: DialogLine, index: number, array: DialogLine[]) {
+                console.log(`\n${line.character.name.toUpperCase()}: ${line.text}`);
+            }
+        )
+        console.log(`================`)
+    }
 }
 
 interface ICorpus {
@@ -109,9 +145,8 @@ class Corpus implements ICorpus {
     parsedLines = false;
     parsedConversations = false;
 
-    // TODO: lol I can't figure out computed properties, fucking figure it out and do that instead. 
-    parsingComplete() { 
-        return this.parsedMovies && this.parsedCharacters && this.parsedLines && this.parsedConversations
+    get parsingComplete(): Boolean {
+        return this.parsedMovies && this.parsedCharacters && this.parsedLines && this.parsedConversations;
     }
 
     constructor(
@@ -121,7 +156,7 @@ class Corpus implements ICorpus {
         public conversations:  Conversation[]          = new Array<Conversation>())
     {}
 
-	static fromZip() {
+	static fromZip(): Corpus {
         var newCorpus = new Corpus();
         
         let corpusCachedZip   = path.join(newCorpus.spamplayCacheDir, "cornell_movie_dialogs_corpus.zip");
@@ -136,7 +171,7 @@ class Corpus implements ICorpus {
             throw "You didn't get the Corpus and I'm too dumb to do it for you yet";
         }
         if (!testPathExistsSync(corpusCacheDir)) {
-            newCorpus.unzipCorpusWithShellOut();
+            unzipShellout(corpusCachedZip, corpusCacheDir);
         }
 
         // TODO: use some async library (ugh) to parallelize these: 
@@ -162,10 +197,6 @@ class Corpus implements ICorpus {
     //     this.parseRawLinesString(linesString);
     //     this.parseRawConversationsString(conversationsString);
     // }
-
-    unzipCorpusWithShellOut() {
-        let output = subprocess.execSync(`unzip -d "${this.spamplayCacheDir}" "${this.corpusCachedZip}"`);
-    }
 
     // TODO: how do I declare the signature of the foreachLine and callback functions ?
     parseRawCorpusString(rawString: string, requiredFieldCount: number, foreachSplitLine: Function, callback: Function) {
@@ -193,13 +224,14 @@ class Corpus implements ICorpus {
     
     parseRawMoviesString(movies: string): void {
         let lineParser = (splitLine: string) => {
-            var movieId = parseInt(splitLine[0].substring(1));
-            var title = splitLine[1];
-            var year = parseInt(splitLine[2]);
-            var rating = parseFloat(splitLine[3]);
-            var voteCount = parseInt(splitLine[4]);
-            //var genres = splitLine[5]; // TODO: split this into something useful
-            this.movies.map[movieId.toString()] = new Movie(title, year, rating, voteCount, movieId);
+            let movieId = parseInt(splitLine[0].substring(1));
+            let title = toTitleCase(splitLine[1]);
+            let year = parseInt(splitLine[2]);
+            let rating = parseFloat(splitLine[3]);
+            let voteCount = parseInt(splitLine[4]);
+            let lineIdStrings = splitLine[3].match(/L\d+/g);
+            let genres = splitLine[5].match(/[a-zA-Z0-9\-]+/g);
+            this.movies.map[movieId.toString()] = new Movie(title, year, rating, voteCount, movieId, genres);
         }
         let completionClosure = () => { 
             console.log(`Parsed ${this.movies.length} movies`);
@@ -209,13 +241,13 @@ class Corpus implements ICorpus {
     }
     parseRawCharactersString(characters: string): void {
         let lineParser = (splitLine: string) => {
-            var charId = parseInt(splitLine[0].substring(1));
-            var charName = splitLine[1];
-            var movieId = parseInt(splitLine[2].substring(1));
-            var movieName = splitLine[3];
-            var movie = this.movies.map[movieId.toString()];
-            var charGender = (splitLine[4] != '?') ? splitLine[4] : null;
-            var creditsPosition = parseInt(splitLine[5]);
+            let charId = parseInt(splitLine[0].substring(1));
+            let charName = toTitleCase(splitLine[1]);
+            let movieId = parseInt(splitLine[2].substring(1));
+            let movieName = splitLine[3];
+            let movie = this.movies.map[movieId.toString()];
+            let charGender = (splitLine[4] != '?') ? splitLine[4] : null;
+            let creditsPosition = parseInt(splitLine[5]);
             this.characters.map[charId.toString()] = new Character(charName, movie, movieId, charGender, creditsPosition);
         }
         let completionClosure = () => {
@@ -226,13 +258,13 @@ class Corpus implements ICorpus {
     }
     parseRawLinesString(lines: string): void {
         let lineParser = (splitLine: string[]) => {
-            var lineId = parseInt(splitLine[0].substring(1));
-            var charId = parseInt(splitLine[1].substring(1));
-            var character = this.characters.map[charId.toString()];
-            var movieId = parseInt(splitLine[2].substring(1));
-            var movie = this.movies.map[movieId.toString()];
-            var charName = splitLine[3];
-            var text = splitLine[4];
+            let lineId = parseInt(splitLine[0].substring(1));
+            let charId = parseInt(splitLine[1].substring(1));
+            let character = this.characters.map[charId.toString()];
+            let movieId = parseInt(splitLine[2].substring(1));
+            let movie = this.movies.map[movieId.toString()];
+            let charName = splitLine[3];
+            let text = splitLine[4];
             this.lines.map[lineId.toString()] = new DialogLine(character, movie, text, lineId);
         }
         let completionClosure = () => {
@@ -243,8 +275,8 @@ class Corpus implements ICorpus {
     }
     parseRawConversationsString(conversations: string): void {
         let lineParser = (splitLine: string[]) => { 
-            var char1Id = parseInt(splitLine[0].substring(1));
-            var char2Id = parseInt(splitLine[1].substring(1));
+            let char1Id = parseInt(splitLine[0].substring(1));
+            let char2Id = parseInt(splitLine[1].substring(1));
             let characters = [this.characters.map[char1Id.toString()], this.characters.map[char2Id.toString()]]
             let movieId = parseInt(splitLine[2].substring(1));
             let movie = this.movies.map[movieId.toString()];
@@ -253,11 +285,15 @@ class Corpus implements ICorpus {
                 console.log(`couldn't figure out the line IDs for convo "${splitLine.join(' ')}"`)
             }
             var lineObjects = [];
-            for (var idy=0; idy < lineIdStrings.length; ++idy) {
-                let lineId = lineIdStrings[idy];
-                let lineObj = this.lines.map[lineId];
-                lineObjects.push(lineObj);
-            }
+
+            lineIdStrings.forEach(
+                (lineIdString: string, index: number, array: string[]) => {
+                    let lineId = lineIdString.substring(1);
+                    let lineObj = this.lines.map[lineId];
+                    lineObjects.push(lineObj);
+                }
+            )
+
             this.conversations.push(new Conversation(characters, movie, lineObjects));
         }
         let completionClosure = () => { 
@@ -265,9 +301,24 @@ class Corpus implements ICorpus {
             this.parsedConversations = true; 
         }
         this.parseRawCorpusString(conversations, 4, lineParser, completionClosure);
-   }
+    }
+
+    randomConversation(): Conversation {
+        return this.conversations[ getRandomIntInclusive(0, this.conversations.length) ]
+    }
 }
 
 console.log("Attempting to parse corpus data...");
 let corpus = Corpus.fromZip();
+
+let intervalId = setInterval(
+    function() {
+        if (corpus.parsingComplete) {
+            console.log("PARSING COMPLETE");
+            corpus.randomConversation().consolePrint();
+            clearInterval(intervalId);
+        }
+    },
+    2000
+);
 
