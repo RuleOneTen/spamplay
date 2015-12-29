@@ -4,6 +4,7 @@ import fs = require("fs");
 import path = require("path");
 import http = require("http");
 import subprocess = require("child_process");
+import sqljs = require("sql.js");
 //import zlib = require("zlib");
 //import AdmZip = require("adm-zip");
 
@@ -68,6 +69,10 @@ class Dictionary<ValueType> {
     get length(): number { 
         return this.values.length
     }
+}
+
+class PersistedArray<ValueType> {
+
 }
 
 interface IMovie {
@@ -137,66 +142,61 @@ interface ICorpus {
 }
 class Corpus implements ICorpus {
 
-	corpusZipUrl      = "http://www.mpi-sws.org/~cristian/data/cornell_movie_dialogs_corpus.zip";
-	spamplayCacheDir  = path.join(__dirname, "cache");
-    
+    get movies() {
+
+    }
+
     parsedMovies = false;
     parsedCharacters = false;
     parsedLines = false;
     parsedConversations = false;
 
+    private databasePath: string;
+    private database: sqljs.Database;
+
     get parsingComplete(): Boolean {
         return this.parsedMovies && this.parsedCharacters && this.parsedLines && this.parsedConversations;
     }
 
-    constructor(
-        public movies:         Dictionary<Movie>       = new Dictionary<Movie>(),
-        public characters:     Dictionary<Character>   = new Dictionary<Character>(),
-        public lines:          Dictionary<DialogLine>  = new Dictionary<DialogLine>(),
-        public conversations:  Conversation[]          = new Array<Conversation>())
-    {}
+    constructor(public cacheDir: string = path.join(__dirname, "cache")) {
+        if (! testPathExistsSync(cacheDir)) {
+            try { fs.mkdirSync(cacheDir); } catch (error) {}; // TODO: throw any error except one where the dir alredy exists
+        }
 
-	static fromZip(): Corpus {
-        var newCorpus = new Corpus();
-        
-        let corpusCachedZip   = path.join(newCorpus.spamplayCacheDir, "cornell_movie_dialogs_corpus.zip");
-        let corpusCacheDir    = path.join(newCorpus.spamplayCacheDir, "cornell movie-dialogs corpus");
-        let charactersFile    = path.join(corpusCacheDir, 'movie_characters_metadata.txt');
-        let conversationsFile = path.join(corpusCacheDir, 'movie_conversations.txt');
-        let linesFile         = path.join(corpusCacheDir, 'movie_lines.txt');
-        let moviesFile        = path.join(corpusCacheDir, 'movie_titles_metadata.txt');
+        let databasePath = path.join(this.cacheDir, "corpus.sqlite")
+        if (! testPathExistsSync(databasePath)) {
+            this.initializeDatabaseFromZip()
+        }
+    }
 
-        try { fs.mkdirSync(newCorpus.spamplayCacheDir); } catch (error) {}; // TODO: throw any error except one where the dir alredy exists
-        if (! (testPathExistsSync(newCorpus.spamplayCacheDir)) ) {
+    private initializeDatabaseFromZip() {
+        let corpusCachedZip   = path.join(this.cacheDir, "cornell_movie_dialogs_corpus.zip");
+        let extractedZipDir   = path.join(this.cacheDir, "cornell movie-dialogs corpus");
+        let charactersFile    = path.join(extractedZipDir, 'movie_characters_metadata.txt');
+        let conversationsFile = path.join(extractedZipDir, 'movie_conversations.txt');
+        let linesFile         = path.join(extractedZipDir, 'movie_lines.txt');
+        let moviesFile        = path.join(extractedZipDir, 'movie_titles_metadata.txt');
+
+        this.databasePath     = path.join(this.cacheDir, "spamplay.sqlite");
+
+        try { fs.mkdirSync(this.cacheDir); } catch (error) {}; // TODO: throw any error except one where the dir alredy exists
+        if (! (testPathExistsSync(this.cacheDir)) ) {
+            //let corpusZipUrl = "http://www.mpi-sws.org/~cristian/data/cornell_movie_dialogs_corpus.zip";
             throw "You didn't get the Corpus and I'm too dumb to do it for you yet";
         }
-        if (!testPathExistsSync(corpusCacheDir)) {
-            unzipShellout(corpusCachedZip, corpusCacheDir);
+        if (!testPathExistsSync(extractedZipDir)) {
+            unzipShellout(corpusCachedZip, extractedZipDir);
+        }
+        if (testPathExistsSync(this.databasePath)) {
+            throw `Database already exists at ${this.databasePath}`;
         }
 
         // TODO: use some async library (ugh) to parallelize these: 
-        newCorpus.parseRawMoviesString(        fs.readFileSync(moviesFile).toString()        );
-        newCorpus.parseRawCharactersString(    fs.readFileSync(charactersFile).toString()    );
-        newCorpus.parseRawLinesString(         fs.readFileSync(linesFile).toString()         );
-        newCorpus.parseRawConversationsString( fs.readFileSync(conversationsFile).toString() );
-
-        return newCorpus;
+        // this.parseRawMoviesString(        fs.readFileSync(moviesFile).toString()        );
+        // this.parseRawCharactersString(    fs.readFileSync(charactersFile).toString()    );
+        // this.parseRawLinesString(         fs.readFileSync(linesFile).toString()         );
+        // this.parseRawConversationsString( fs.readFileSync(conversationsFile).toString() );
     }
-
-    // unzipCorpusWithAdmZip() {
-    //     // TODO: typescriptify this
-    //     let zip = new AdmZip(Corpus.corpusCachedZip);
-    //     let moviesString = zip.readAsText('cornell movie-dialogs corpus/movie_titles_metadata.txt');
-    //     let charactersString = zip.readAsText('cornell movie-dialogs corpus/movie_characters_metadata.txt');
-    //     let linesString = zip.readAsText('cornell movie-dialogs corpus/movie_lines.txt');
-    //     let conversationsString = zip.readAsText('cornell movie-dialogs corpus/movie_conversations.txt');
-
-    //     // TODO: use some async library (ugh) to parallelize these: 
-    //     this.parseRawMoviesString(moviesString);
-    //     this.parseRawCharactersString(charactersString);
-    //     this.parseRawLinesString(linesString);
-    //     this.parseRawConversationsString(conversationsString);
-    // }
 
     // TODO: how do I declare the signature of the foreachLine and callback functions ?
     parseRawCorpusString(rawString: string, requiredFieldCount: number, foreachSplitLine: Function, callback: Function) {
