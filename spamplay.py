@@ -1,9 +1,14 @@
-#!/usr/bin/env python
+#!/usr/bin/python3
 
 import os
 import re
 import sys
 import zipfile
+
+import sqlalchemy as sqla
+
+
+SQLABase = sqla.ext.declarative.declarative_base()
 
 
 def strace():
@@ -11,7 +16,34 @@ def strace():
     pdb.set_trace()
 
 
-class Movie(object):
+class Genre(SQLABase):
+
+    __tablename__ = "genres"
+    id = sqla.Column(sqla.Integer, primary_key=True)
+    name = sqla.Column(sqla.String(Length=32))
+
+    def __init__(self, name):
+        self.name = name
+
+
+class Movie(SQLABase):
+
+    __tablename__ = "movies"
+    id = sqla.Column(sqla.Integer, primary_key=True)
+    cornell_id = sqla.Column(sqla.Integer)
+    title = sqla.Column(sqla.String(64))
+    year = sqla.Column(sqla.Integer)
+    imdb_rating = sqla.Column(sqla.Float)
+    imdb_vote_count = sqla.Column(sqla.Integer)
+
+    genres = sqla.orm.relationship(
+        "Genre",
+        secondary=sqla.Table(
+            'movies_genres', SQLABase.metadata,
+            sqla.Column("movie_id", sqla.Integer, sqla.ForeignKey('movies.id'), primary_key=True),
+            sqla.Column("genre_id", sqla.Integer, sqla.ForeignKey('genres.id'), primary_key=True)),
+        backref="genres")
+    # TODO: properties for characters, lines, and convos from a given movie?
 
     def __init__(
             self, title, year, imdb_rating, imdb_vote_count, cornell_id,
@@ -23,13 +55,24 @@ class Movie(object):
         self.genres = genres
         self.cornell_id = cornell_id
 
-    def __str__(self):
-        string = "{} ({}) - {}/10".format(
-            self.title, self.year, self.imdb_rating)
-        return string
+    def __repr__(self):
+        reprstr = "{} ({}) - {}/10 - #".format(
+            self.title, self.year, self.imdb_rating, self.id)
+        return reprstr
 
 
 class Character(object):
+
+    __tablename__ = "characters"
+    id = sqla.Column(sqla.Integer, primary_key=True)
+    cornell_id = sqla.Column(sqla.Integer)
+    name = sqla.Column(sqla.String(64))
+    gender = sqla.Column(sqla.String(32))
+    movie_id = sqla.Column(sqla.Integer, sqla.ForeignKey('movies.id'))
+    credit_position = sqla.Column(sqla.Integer)
+
+    movie = sqla.orm.relationship("Movie", back_populates="characters")
+    # TODO: properties for lines and convos for a given character
 
     def __init__(
             self, name, movie, cornell_id, gender=None, credit_position=None):
@@ -40,14 +83,26 @@ class Character(object):
         self.cornell_id = cornell_id
 
     def __str__(self):
-        string = "{} [{} ({})]".format(
+        sqla.String = "{} [{} ({})]".format(
             self.name, self.movie.title, self.movie.year)
         if self.gender:
-            string += " - {}".format(self.gender)
-        return string
+            sqla.String += " - {}".format(self.gender)
+        return sqla.String
 
 
 class DialogLine(object):
+
+    __tablename__ = "dialog_lines"
+    id = sqla.Column(sqla.Integer, primary_key=True)
+    cornell_id = sqla.Column(sqla.Integer)
+    character_id = sqla.Column(sqla.Integer, sqla.ForeignKey("characters.id"))
+    movie_id = sqla.Column(sqla.Integer, sqla.ForeignKey("movies.id"))
+    conversation_id = sqla.Column(sqla.Integer, sqla.ForeignKey("conversations.id"))
+    text = sqla.Column(sqla.String)  # NOTE: this needs to be unlimited in length
+
+    character = sqla.orm.relationship("Character", back_populates="dialog_lines")
+    movie = sqla.orm.relationship("Movie", back_populates="dialog_lines")
+    conversation = sqla.orm.relationship("Conversation", back_populates="dialog_lines")
 
     def __init__(self, character, movie, text, cornell_id):
         self.character = character
@@ -55,23 +110,36 @@ class DialogLine(object):
         self.text = text
         self.cornell_id = cornell_id
 
-    def __str__(self):
-        string = '<DialogLine - {}: "{}">'.format(
+    def __repr__(self):
+        reprstr = '<DialogLine - {}: "{}">'.format(
             self.character.name, self.text)
-        return string
+        return reprstr
 
 
 class Conversation(object):
+
+    # TODO: support convos with >2 participants
+    __tablename__ = "conversations"
+    id = sqla.Column(sqla.Integer, primary_key=True)
+    character1_id = sqla.Column(sqla.Integer, sqla.ForeignKey("characters.id"))
+    character2_id = sqla.Column(sqla.Integer, sqla.ForeignKey("characters.id"))
+    movie_id = sqla.Column(sqla.Integer, sqla.ForeignKey("movies.id"))
+
+    character1 = sqla.orm.relationship("Character", back_populates="conversations")
+    character2 = sqla.orm.relationship("Character", back_populates="conversations")
+    movie = sqla.orm.relationship("Movie", back_populates="conversations")
+    lines = sqla.orm.relationship(
+        "DialogLine", back_populates="conversations", order_by=DialogLine.id)
 
     def __init__(self, characters, movie, lines):
         self.characters = characters
         self.movie = movie
         self.lines = lines
 
-    def __str__(self):
-        string = "Conversation between '{}' from {} ({})".format(
+    def __repr__(self):
+        reprstr = "Conversation between '{}' from {} ({})".format(
             self.characters, self.movie.title, self.movie.year)
-        return string
+        return reprstr
 
 
 class Corpus(object):
