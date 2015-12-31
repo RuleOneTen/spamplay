@@ -144,11 +144,22 @@ class Conversation(object):
 
 class Corpus(object):
 
-    def __init__(self, zipfile_path):
+    def __init__(
+            self,
+            dbpath="{}/spamplay.sqlite".format(
+                os.path.dirname(os.path.realpath(__file__)))):
+        self.dbpath = dbpath
         self.movies = {}
         self.characters = {}
         self.lines = {}
         self.conversations = ()  # NOTE: list, not a dict like the others
+
+    @staticmethod
+    def fromZipfile(zipfile_path):
+
+        newCorpus = Corpus()
+        if os.path.exists(newCorpus.dbpath):
+            raise Exception("Database already exist at {}".format(newCorpus.dbpath))
 
         corpus_zip = zipfile.ZipFile(zipfile_path, 'r')
         chars  = corpus_zip.open('cornell movie-dialogs corpus/movie_characters_metadata.txt').readlines()
@@ -162,36 +173,38 @@ class Corpus(object):
         for line in titles:
             sl = line.split(separator)
             mid, title, year, rating, vote_count, genres = sl
-            self.movies[mid] = Movie(title, year, rating, vote_count, mid)
+            newCorpus.movies[mid] = Movie(title, year, rating, vote_count, mid)
 
         for line in chars:
             cid, cname, mid, mname, gender, credpos = line.split(separator)
             if gender == '?':
                 gender = None
-            self.characters[cid] = Character(
-                cname, self.movies[mid], cid, gender=gender,
+            newCorpus.characters[cid] = Character(
+                cname, newCorpus.movies[mid], cid, gender=gender,
                 credit_position=credpos)
 
         for line in lines:
             lid, cid, mid, cname, text = line.split(separator)
-            self.lines[lid] = DialogLine(
-                self.characters[cid], self.movies[mid], text, lid)
+            newCorpus.lines[lid] = DialogLine(
+                newCorpus.characters[cid], newCorpus.movies[mid], text, lid)
 
         lids_re = re.compile('L\d+')
         for line in convos:
             cid1, cid2, mid, lidstring = line.split(separator)
-            characters = (self.characters[cid1], self.characters[cid2])
+            characters = (newCorpus.characters[cid1], newCorpus.characters[cid2])
             lids = lids_re.findall(lidstring)
-            lines = [self.lines[l] for l in lids]
-            newConvo = Conversation(characters, self.movies[mid], lines)
-            self.conversations += (newConvo, )
+            lines = [newCorpus.lines[l] for l in lids]
+            newConvo = Conversation(characters, newCorpus.movies[mid], lines)
+            newCorpus.conversations += (newConvo, )
+
+        return newCorpus
 
 
 def main(*args, **kwargs):
-    path = '~/Downloads/cornell_movie_dialogs_corpus.zip'
-    normpath = os.path.abspath(os.path.expanduser(path))
-    corpus = Corpus(normpath)
-    print("Successfully processed corpus data from {}: ".format(normpath))
+    zippath = '~/Downloads/cornell_movie_dialogs_corpus.zip'
+    zipnormpath = os.path.abspath(os.path.expanduser(zippath))
+    corpus = Corpus.fromZipfile(zipnormpath)
+    print("Successfully processed corpus data from {}: ".format(zipnormpath))
     print(" -  {} movies".format(len(corpus.movies.keys())))
     print(" -  {} characters".format(len(corpus.characters.keys())))
     print(" -  {} lines".format(len(corpus.lines.keys())))
