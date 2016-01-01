@@ -10,6 +10,11 @@ import sqlalchemy as sqla
 
 SQLABase = sqla.ext.declarative.declarative_base()
 
+default_db_path = os.path.abspath(
+    os.path.join(
+        os.path.dirname(os.path.realpath(__file__)),
+        "/spamplay.sqlite"))
+
 
 def strace():
     import pdb
@@ -144,11 +149,14 @@ class Conversation(object):
 
 class Corpus(object):
 
-    def __init__(
-            self,
-            dbpath="{}/spamplay.sqlite".format(
-                os.path.dirname(os.path.realpath(__file__)))):
-        self.dbpath = dbpath
+    def __init__(self, dbpath=default_db_path):
+        """
+        NOTE: set dbpath to '/:memory:' to use an in-memory database
+        NOTE: not sure if dbpath works as a relative path or not
+        """
+
+        self.dbpath = "sqlite://" + dbpath
+        self.dbengine = sqla.create_engine(self.dbpath, echo=True)
         self.movies = {}
         self.characters = {}
         self.lines = {}
