@@ -1,19 +1,28 @@
 #!/usr/bin/python3
 
+import argparse
 import os
 import re
 import sys
 import zipfile
 
 import sqlalchemy as sqla
+from sqlalchemy.ext.declarative import declarative_base
 
 
-SQLABase = sqla.ext.declarative.declarative_base()
+SQLABase = declarative_base()
 
-default_db_path = os.path.abspath(
+zipfilepath = os.path.abspath(
     os.path.join(
         os.path.dirname(os.path.realpath(__file__)),
-        "/spamplay.sqlite"))
+        "cache", "cornell_movie_dialogs_corpus.zip"))
+dbpath = os.path.abspath(
+    os.path.join(
+        os.path.dirname(os.path.realpath(__file__)),
+        "spamplay.sqlite"))
+dburi = "sqlite:///" + dbpath
+dbengine = sqla.create_engine(dburi, echo=True)
+sessionmaker = sqla.orm.sessionmaker(bind=dbengine)
 
 
 def strace():
@@ -25,7 +34,7 @@ class Genre(SQLABase):
 
     __tablename__ = "genres"
     id = sqla.Column(sqla.Integer, primary_key=True)
-    name = sqla.Column(sqla.String(Length=32))
+    name = sqla.Column(sqla.String(32))
 
     def __init__(self, name):
         self.name = name
@@ -66,7 +75,7 @@ class Movie(SQLABase):
         return reprstr
 
 
-class Character(object):
+class Character(SQLABase):
 
     __tablename__ = "characters"
     id = sqla.Column(sqla.Integer, primary_key=True)
@@ -76,7 +85,7 @@ class Character(object):
     movie_id = sqla.Column(sqla.Integer, sqla.ForeignKey('movies.id'))
     credit_position = sqla.Column(sqla.Integer)
 
-    movie = sqla.orm.relationship("Movie", back_populates="characters")
+    movie = sqla.orm.relationship("Movie", backref="characters")
     # TODO: properties for lines and convos for a given character
 
     def __init__(
@@ -95,7 +104,7 @@ class Character(object):
         return sqla.String
 
 
-class DialogLine(object):
+class DialogLine(SQLABase):
 
     __tablename__ = "dialog_lines"
     id = sqla.Column(sqla.Integer, primary_key=True)
@@ -105,9 +114,8 @@ class DialogLine(object):
     conversation_id = sqla.Column(sqla.Integer, sqla.ForeignKey("conversations.id"))
     text = sqla.Column(sqla.String)  # NOTE: this needs to be unlimited in length
 
-    character = sqla.orm.relationship("Character", back_populates="dialog_lines")
-    movie = sqla.orm.relationship("Movie", back_populates="dialog_lines")
-    conversation = sqla.orm.relationship("Conversation", back_populates="dialog_lines")
+    character = sqla.orm.relationship("Character", backref="dialog_lines")
+    movie = sqla.orm.relationship("Movie", backref="dialog_lines")
 
     def __init__(self, character, movie, text, cornell_id):
         self.character = character
@@ -121,7 +129,7 @@ class DialogLine(object):
         return reprstr
 
 
-class Conversation(object):
+class Conversation(SQLABase):
 
     # TODO: support convos with >2 participants
     __tablename__ = "conversations"
@@ -130,11 +138,11 @@ class Conversation(object):
     character2_id = sqla.Column(sqla.Integer, sqla.ForeignKey("characters.id"))
     movie_id = sqla.Column(sqla.Integer, sqla.ForeignKey("movies.id"))
 
-    character1 = sqla.orm.relationship("Character", back_populates="conversations")
-    character2 = sqla.orm.relationship("Character", back_populates="conversations")
-    movie = sqla.orm.relationship("Movie", back_populates="conversations")
+    character1 = sqla.orm.relationship("Character", backref="conversations")
+    character2 = sqla.orm.relationship("Character", backref="conversations")
+    movie = sqla.orm.relationship("Movie", backref="conversations")
     lines = sqla.orm.relationship(
-        "DialogLine", back_populates="conversations", order_by=DialogLine.id)
+        "DialogLine", backref="conversations", order_by=DialogLine.id)
 
     def __init__(self, characters, movie, lines):
         self.characters = characters
@@ -147,76 +155,94 @@ class Conversation(object):
         return reprstr
 
 
-class Corpus(object):
+def parseCorpusZip(zipfile_path):
 
-    def __init__(self, dbpath=default_db_path):
-        """
-        NOTE: set dbpath to '/:memory:' to use an in-memory database
-        NOTE: not sure if dbpath works as a relative path or not
-        """
+    # if os.path.exists(newCorpus.dbpath):
+    #     raise Exception("Database already exist at {}".format(newCorpus.dbpath))
 
-        self.dbpath = "sqlite://" + dbpath
-        self.dbengine = sqla.create_engine(self.dbpath, echo=True)
-        self.movies = {}
-        self.characters = {}
-        self.lines = {}
-        self.conversations = ()  # NOTE: list, not a dict like the others
+    session = sessionmaker()
 
-    @staticmethod
-    def fromZipfile(zipfile_path):
+    zipfile_path = os.path.abspath(os.path.expanduser(zipfile_path))
+    corpus_zip = zipfile.ZipFile(zipfile_path, 'r')
+    chars  = corpus_zip.open('cornell movie-dialogs corpus/movie_characters_metadata.txt').readlines()
+    convos = corpus_zip.open('cornell movie-dialogs corpus/movie_conversations.txt').readlines()
+    lines  = corpus_zip.open('cornell movie-dialogs corpus/movie_lines.txt').readlines()
+    titles = corpus_zip.open('cornell movie-dialogs corpus/movie_titles_metadata.txt').readlines()
+    corpus_zip.close()
 
-        newCorpus = Corpus()
-        if os.path.exists(newCorpus.dbpath):
-            raise Exception("Database already exist at {}".format(newCorpus.dbpath))
+    separator = ' +++$+++ '
 
-        corpus_zip = zipfile.ZipFile(zipfile_path, 'r')
-        chars  = corpus_zip.open('cornell movie-dialogs corpus/movie_characters_metadata.txt').readlines()
-        convos = corpus_zip.open('cornell movie-dialogs corpus/movie_conversations.txt').readlines()
-        lines  = corpus_zip.open('cornell movie-dialogs corpus/movie_lines.txt').readlines()
-        titles = corpus_zip.open('cornell movie-dialogs corpus/movie_titles_metadata.txt').readlines()
-        corpus_zip.close()
+    for line in titles:
+        line = str(line)
+        mid, title, year, rating, vote_count, genres = line.split(separator)
+        newmovie = Movie(title, year, rating, vote_count, mid)
+        session.add(newmovie)
+    session.commit()
 
-        separator = ' +++$+++ '
+    for line in chars:
+        line = str(line)
+        cid, cname, mid, mname, gender, credpos = line.split(separator)
+        if gender == '?':
+            gender = None
+        movie = session.query(Movie).filter(Movie.cornell_id==mid)
+        newchar = Character(
+            cname, movie, cid, gender=gender,
+            credit_position=credpos)
+        session.add(newchar)
+    session.commit()
 
-        for line in titles:
-            sl = line.split(separator)
-            mid, title, year, rating, vote_count, genres = sl
-            newCorpus.movies[mid] = Movie(title, year, rating, vote_count, mid)
+    for line in lines:
+        line = str(line)
+        lid, cid, mid, cname, text = line.split(separator)
+        character = session.query(Character).filter(Character.cornell_id==cid)
+        movie = session.query(Movie).filter(Movie.cornell_id==mid)
+        newline = DialogLine(character, movie, text, lid)
+        session.add(newline)
+    session.commit()
 
-        for line in chars:
-            cid, cname, mid, mname, gender, credpos = line.split(separator)
-            if gender == '?':
-                gender = None
-            newCorpus.characters[cid] = Character(
-                cname, newCorpus.movies[mid], cid, gender=gender,
-                credit_position=credpos)
-
-        for line in lines:
-            lid, cid, mid, cname, text = line.split(separator)
-            newCorpus.lines[lid] = DialogLine(
-                newCorpus.characters[cid], newCorpus.movies[mid], text, lid)
-
-        lids_re = re.compile('L\d+')
-        for line in convos:
-            cid1, cid2, mid, lidstring = line.split(separator)
-            characters = (newCorpus.characters[cid1], newCorpus.characters[cid2])
-            lids = lids_re.findall(lidstring)
-            lines = [newCorpus.lines[l] for l in lids]
-            newConvo = Conversation(characters, newCorpus.movies[mid], lines)
-            newCorpus.conversations += (newConvo, )
-
-        return newCorpus
+    lids_re = re.compile('L\d+')
+    for line in convos:
+        line = str(line)
+        cid1, cid2, mid, lidstring = line.split(separator)
+        characters = (
+            session.query(Character).filter(Character.cornell_id==cid1),
+            session.query(Character).filter(Character.cornell_id==cid2))
+        lineids = lids_re.findall(lidstring)
+        lines = [session.query(DialogLine).filter(DialogLine.cornell_id==lid) for lid in lineids]
+        movie = session.query(Movie).filter(Movie.cornell_id==mid)
+        newconvo = Conversation(characters, movie, lines)
+        session.add(newconvo)
+    session.commit()
 
 
 def main(*args, **kwargs):
-    zippath = '~/Downloads/cornell_movie_dialogs_corpus.zip'
-    zipnormpath = os.path.abspath(os.path.expanduser(zippath))
-    corpus = Corpus.fromZipfile(zipnormpath)
-    print("Successfully processed corpus data from {}: ".format(zipnormpath))
-    print(" -  {} movies".format(len(corpus.movies.keys())))
-    print(" -  {} characters".format(len(corpus.characters.keys())))
-    print(" -  {} lines".format(len(corpus.lines.keys())))
-    print(" -  {} conversations".format(len(corpus.conversations)))
+    parser = argparse.ArgumentParser(description="Miss spam? Here's more!")
+    parser.add_argument('--purge','-p', action='store_true', 
+        help='Nuke the database & reinitialize')
+
+    parsed = parser.parse_args()
+
+    if parsed.purge:
+        try:
+            os.remove(dbpath)
+        except OSError:
+            # Either path doesn't exist OR we have no permission; hope it's the former
+            pass 
+
+    if not os.path.isfile(dbpath):
+        #print("Creating new DB at '{}'' using URI '{}'...".format(dbpath, dburi))
+        SQLABase.metadata.create_all(dbengine)
+        parseCorpusZip(zipfilepath)
+
+    session = sessionmaker()
+    session.query(Movie).count()
+
+    print("Successfully processed corpus data from zip")
+    print(" -  {} movies".format( session.query(Movie).count() ))
+    print(" -  {} characters".format( session.query(Character).count() ))
+    print(" -  {} lines".format( session.query(DialogLine).count() ))
+    print(" -  {} conversations".format( session.query(Conversation).count() ))
+
 
 if __name__ == '__main__':
     sys.exit(main(*sys.argv))
