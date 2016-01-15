@@ -1,6 +1,9 @@
 #!/usr/bin/python3
 
+from __future__ import print_function
+
 import argparse
+import logging
 import os
 import re
 import sys
@@ -9,17 +12,22 @@ import zipfile
 import sqlalchemy as sqla
 from sqlalchemy.ext.declarative import declarative_base
 
+# Conditional imports
+if sys.version_info.major >= 3:
+    from urllib.request import urlretrieve
+else:
+    from urllib import urlretrieve
+
+
+logging.basicConfig(level=logging.DEBUG)
 
 SQLABase = declarative_base()
 
-zipfilepath = os.path.abspath(
-    os.path.join(
-        os.path.dirname(os.path.realpath(__file__)),
-        "cache", "cornell_movie_dialogs_corpus.zip"))
-dbpath = os.path.abspath(
-    os.path.join(
-        os.path.dirname(os.path.realpath(__file__)),
-        "spamplay.sqlite"))
+cachedir = os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__)), "cache"))
+zipfilepath = os.path.join(cachedir, "cornell_movie_dialogs_corpus.zip")
+zipfilesha1 = "c741f6b6ab15caace55bc16d9c6de266964877dc"
+zipurl = "http://www.mpi-sws.org/~cristian/data/cornell_movie_dialogs_corpus.zip"
+dbpath = os.path.join(cachedir, "spamplay.sqlite")
 dburi = "sqlite:///" + dbpath
 dbengine = sqla.create_engine(dburi, echo=True)
 sessionmaker = sqla.orm.sessionmaker(bind=dbengine)
@@ -155,7 +163,14 @@ class Conversation(SQLABase):
         return reprstr
 
 
+def downloadCorpusZip():
+    logging.info("Downloading zipfile from '{}' to '{}'...".format(zipurl, zipfilepath))
+    urlretrieve(zipurl, zipfilepath)
+
+
 def parseCorpusZip(zipfile_path):
+
+    logging.info("Parsing corpus from zipfile...")
 
     # if os.path.exists(newCorpus.dbpath):
     #     raise Exception("Database already exist at {}".format(newCorpus.dbpath))
@@ -217,20 +232,22 @@ def parseCorpusZip(zipfile_path):
 
 def main(*args, **kwargs):
     parser = argparse.ArgumentParser(description="Miss spam? Here's more!")
-    parser.add_argument('--purge','-p', action='store_true', 
-        help='Nuke the database & reinitialize')
+    parser.add_argument('--purge', '-p', action='store_true',
+                        help='Nuke the database & reinitialize')
 
     parsed = parser.parse_args()
 
     if parsed.purge:
+        logging.info("Purging existing database from '{}', if present".format(dbpath))
         try:
             os.remove(dbpath)
         except OSError:
             # Either path doesn't exist OR we have no permission; hope it's the former
-            pass 
+            pass
 
     if not os.path.isfile(dbpath):
-        #print("Creating new DB at '{}'' using URI '{}'...".format(dbpath, dburi))
+        if not os.path.isfile(zipfilepath):
+            downloadCorpusZip()
         SQLABase.metadata.create_all(dbengine)
         parseCorpusZip(zipfilepath)
 
