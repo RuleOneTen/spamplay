@@ -29,8 +29,7 @@ zipfilesha1 = "c741f6b6ab15caace55bc16d9c6de266964877dc"
 zipurl = "http://www.mpi-sws.org/~cristian/data/cornell_movie_dialogs_corpus.zip"
 dbpath = os.path.join(cachedir, "spamplay.sqlite")
 dburi = "sqlite:///" + dbpath
-dbengine = sqla.create_engine(dburi, echo=True)
-sessionmaker = sqla.orm.sessionmaker(bind=dbengine)
+sessionmaker = sqla.orm.sessionmaker()
 
 
 def strace():
@@ -74,8 +73,9 @@ class Movie(SQLABase):
         self.year = year
         self.imdb_rating = imdb_rating
         self.imdb_vote_count = imdb_vote_count
-        self.genres = genres
         self.cornell_id = cornell_id
+        if genres:
+            self.genres = genres
 
     def __repr__(self):
         reprstr = "{} ({}) - {}/10 - #".format(
@@ -146,8 +146,10 @@ class Conversation(SQLABase):
     character2_id = sqla.Column(sqla.Integer, sqla.ForeignKey("characters.id"))
     movie_id = sqla.Column(sqla.Integer, sqla.ForeignKey("movies.id"))
 
-    character1 = sqla.orm.relationship("Character", backref="conversations")
-    character2 = sqla.orm.relationship("Character", backref="conversations")
+    #character1 = sqla.orm.relationship("Character", backref="conversations", foreign_keys=[character1_id])
+    #character2 = sqla.orm.relationship("Character", backref="conversations", foreign_keys=[character2_id])
+    character1 = sqla.orm.relationship("Character", foreign_keys=[character1_id])
+    character2 = sqla.orm.relationship("Character", foreign_keys=[character2_id])
     movie = sqla.orm.relationship("Movie", backref="conversations")
     lines = sqla.orm.relationship(
         "DialogLine", backref="conversations", order_by=DialogLine.id)
@@ -187,6 +189,7 @@ def parseCorpusZip(zipfile_path):
 
     separator = ' +++$+++ '
 
+    logging.info("Parsing movies...")
     for line in titles:
         line = str(line)
         mid, title, year, rating, vote_count, genres = line.split(separator)
@@ -194,18 +197,18 @@ def parseCorpusZip(zipfile_path):
         session.add(newmovie)
     session.commit()
 
+    logging.info("Parsing characters...")
     for line in chars:
         line = str(line)
         cid, cname, mid, mname, gender, credpos = line.split(separator)
         if gender == '?':
             gender = None
         movie = session.query(Movie).filter(Movie.cornell_id==mid)
-        newchar = Character(
-            cname, movie, cid, gender=gender,
-            credit_position=credpos)
+        newchar = Character(cname, movie, cid, gender=gender, credit_position=credpos)
         session.add(newchar)
     session.commit()
 
+    logging.info("Parsing lines...")
     for line in lines:
         line = str(line)
         lid, cid, mid, cname, text = line.split(separator)
@@ -215,6 +218,7 @@ def parseCorpusZip(zipfile_path):
         session.add(newline)
     session.commit()
 
+    logging.info("Parsing conversations...")
     lids_re = re.compile('L\d+')
     for line in convos:
         line = str(line)
@@ -232,18 +236,22 @@ def parseCorpusZip(zipfile_path):
 
 def main(*args, **kwargs):
     parser = argparse.ArgumentParser(description="Miss spam? Here's more!")
-    parser.add_argument('--purge', '-p', action='store_true',
-                        help='Nuke the database & reinitialize')
+    parser.add_argument('--purge', '-p', action='store_true', help='Nuke the database & reinitialize')
+    parser.add_argument('--debug', '-d', action='store_true', help='Show debugging information')
 
     parsed = parser.parse_args()
 
-    if parsed.purge:
-        logging.info("Purging existing database from '{}', if present".format(dbpath))
-        try:
-            os.remove(dbpath)
-        except OSError:
-            # Either path doesn't exist OR we have no permission; hope it's the former
-            pass
+    sqlaecho = False
+    if parsed.debug:
+        sqlaecho = True
+        logging.level = logging.DEBUG
+
+    if parsed.purge and os.path.exists(dbpath):
+        logging.info("Purging existing database at '{}'".format(dbpath))
+        os.remove(dbpath)
+
+    dbengine = sqla.create_engine(dburi, echo=sqlaecho)
+    sessionmaker.configure(bind=dbengine)
 
     if not os.path.isfile(dbpath):
         if not os.path.isfile(zipfilepath):
@@ -255,10 +263,10 @@ def main(*args, **kwargs):
     session.query(Movie).count()
 
     print("Successfully processed corpus data from zip")
-    print(" -  {} movies".format( session.query(Movie).count() ))
-    print(" -  {} characters".format( session.query(Character).count() ))
-    print(" -  {} lines".format( session.query(DialogLine).count() ))
-    print(" -  {} conversations".format( session.query(Conversation).count() ))
+    print(" -  {} movies".format(session.query(Movie).count()))
+    print(" -  {} characters".format(session.query(Character).count()))
+    print(" -  {} lines".format(session.query(DialogLine).count()))
+    print(" -  {} conversations".format(session.query(Conversation).count()))
 
 
 if __name__ == '__main__':
